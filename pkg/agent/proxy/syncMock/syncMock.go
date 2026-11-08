@@ -1237,6 +1237,22 @@ func (m *SyncMockManager) SetDestinationOf(of func(*models.Mock) string) {
 	m.destOf.Store(&of)
 }
 
+// ForgetDestination lets go what the manager keeps of dest's recording: the
+// test cases sent to it (SendTestCaseOf), its first, and the start-up mock it
+// lost that a revoke may re-read. Call it once dest's recording is over, when
+// no test case will be sent to it again, so a manager whose mocks go to many
+// recordings over its life (SetDestinationOf) holds only the live ones'. A
+// mock that still names dest finds no first test case, and counts as one any
+// test may need (servedToAnyTest): fail closed. Test cases already sent to
+// dest are no longer revoked by a later loss: its stream is over.
+func (m *SyncMockManager) ForgetDestination(dest string) {
+	m.sharedLossMu.Lock()
+	defer m.sharedLossMu.Unlock()
+	delete(m.sentTCs.lists, dest)
+	delete(m.startupLost, dest)
+	m.noteFirstSentLocked()
+}
+
 // mockDest names the destination whose recording mock goes to (destOf), ""
 // for a manager whose mocks go to one, with known false when the manager
 // cannot tell it.
