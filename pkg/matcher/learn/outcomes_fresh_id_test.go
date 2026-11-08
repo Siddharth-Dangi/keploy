@@ -46,6 +46,13 @@ func TestOutcomeAPieceOfAFreshIdAtAPlaceShowingNothingOfItsLongWordsIsChance(t *
 		t.Errorf("the line must name mock-45 and say why it is chance: %q", d.Line)
 	}
 
+	again := changed("mock-44", "lead 70e1c2d3-48d1-4f00-8abc-0123456789ab", "lead 1a2b3c4d-4c7d-4e8f-9a0b-4a2e00000000")
+	d = oWord(t, Decide(oInput("body.docs.msgs.0.appId", rec, live, []Earlier{again, chance}, nil)), r, f)
+	costFresh(t, "a 16-bit group at two places that show nothing of the id's long words", d)
+	if !strings.Contains(d.Line, "mock-44") || !strings.Contains(d.Line, "mock-45") {
+		t.Errorf("the line must name both places the group is chance at: %q", d.Line)
+	}
+
 	long := changed("mock-46", "owner 1111aaaa and bb7ed9ee-670e-48d1-982f-b54b2b73982f", "owner 0c1d2e3f-4a5b-4c7d-8e9f-4a2e0b1c2d3e")
 	ds = Decide(oInput("body.docs.msgs.0.appId", rec, live, []Earlier{long}, nil))
 	if d := oWord(t, ds, "1111aaaa", "9999cccc"); d.Outcome != OutcomeRefused {
@@ -98,5 +105,37 @@ func TestOutcomeAStandardBase64KeyIsOneValue(t *testing.T) {
 		if slices.ContainsFunc(ds, func(d Decision) bool { return d.Outcome == OutcomeFresh && d.At.Word < 0 }) {
 			t.Errorf("FALSE GREEN? %s: %s; want no one fresh value", tc.name, oDescribe(ds))
 		}
+	}
+}
+
+// The id is the token the piece stands in, and its long words the changed
+// words of 32 bits or more in both runs inside that token in both runs. A
+// place that holds a 16-bit group inside another id, beside nothing of
+// those, is chance only for such a piece; anywhere else it stays unknown,
+// refused naming it: a short word that stands in no id token (a '/' ends
+// one), a long word outside its token (before or after it), a neighbour or
+// a word of fewer than 32 bits in one run, and a place that holds the id's
+// one long word. (A word inside the token in one run only would need the
+// text between the words to change: changed-shape, decided before.)
+func TestOutcomeOnlyAPieceOfOneIdIsChanceBesideNothingOfItsLongWords(t *testing.T) {
+	changed := func(mock, recText, liveText string) Earlier {
+		return oCarried(mock, "body.note", recText, liveText, 2*time.Second, time.Second, 1)
+	}
+	inside := changed("mock-45", "owner bb7ed9ee-670e-48d1-982f-b54b2b73982f", "owner 0c1d2e3f-4a5b-4c7d-8e9f-4a2e0b1c2d3e")
+	for _, tc := range []struct {
+		what, rec, live, r, f string
+		place                 Earlier
+	}{
+		{"a piece in no id token", "48d1/1111aaaa2222", "4a2e/9999cccc7777", "48d1", "4a2e", inside},
+		{"the long word after the piece's token", "ab-48d1 ref 1111aaaa2222", "ab-4a2e ref 9999cccc7777", "48d1", "4a2e", inside},
+		{"the long word before the piece's token", "1111aaaa2222 ref ab-48d1", "9999cccc7777 ref ab-4a2e", "48d1", "4a2e", inside},
+		{"a neighbour of 32 bits in round F only", "11112222-48d1", "9999cccc-4a2e", "48d1", "4a2e", inside},
+		{"a word of 32 bits in round F only", "11112222-aaaabbbbcccc", "9999cccc-ddddeeeeffff", "11112222", "9999cccc",
+			changed("mock-45", "owner 0000ffff-11112222-abcd", "owner 9999cccc0b1c2d3e")},
+		{"a place that holds the id's one long word", "ab12cd34-48d1", "ef56ab78-4a2e", "48d1", "4a2e",
+			changed("mock-45", "owner 0000ffff-ab12cd34-48d1-0000", "owner 0c1d2e3f-4a5b-4c7d-8e9f-4a2e0b1c2d3e")},
+	} {
+		d := oWord(t, Decide(oInput("body.ref", tc.rec, tc.live, []Earlier{tc.place}, nil)), tc.r, tc.f)
+		oRefused(t, tc.what, d, RefusalUnknown, "mock-45")
 	}
 }

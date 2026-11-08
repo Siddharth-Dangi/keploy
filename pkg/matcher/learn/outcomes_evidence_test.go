@@ -278,7 +278,8 @@ func TestOutcomeAnInstantAnAnswerOutsideTheScopeGaveIsRefusedNamingTheEdit(t *te
 // That is where the recording holds the word as a value of its own. Where
 // it holds a fresh id's 16-bit group only inside another id, and nothing of
 // the id's 32-bit and 48-bit groups, it cannot be where the id came from,
-// whenever it was answered: chance, fresh, its line naming it.
+// whenever it was answered: chance, fresh, its line naming it. One that
+// holds the id's 32-bit group beside it is read as for any word.
 func TestOutcomeASetRecordingWithNoTimeBeforeTheCallShowsNothing(t *testing.T) {
 	const p = "body.appId"
 	before := r1Insert.Add(-time.Minute)
@@ -299,6 +300,7 @@ func TestOutcomeASetRecordingWithNoTimeBeforeTheCallShowsNothing(t *testing.T) {
 		for _, h := range []struct{ what, held string }{
 			{"its own value", "48d1"},
 			{"inside another id", "bb7ed9ee-670e-48d1-982f-b54b2b73982f"},
+			{"inside another id beside the id's 32-bit group", "5c0e9a7b bb7ed9ee-670e-48d1-982f-b54b2b73982f"},
 		} {
 			x := answered(h.held, c.res)
 			what := c.what + ", the group " + h.what
@@ -307,7 +309,7 @@ func TestOutcomeASetRecordingWithNoTimeBeforeTheCallShowsNothing(t *testing.T) {
 			in.Given = func() ([]GivenPlaces, error) { return []GivenPlaces{PlacesOf(x)}, nil }
 			d := oWord(t, Decide(in), "48d1", "4c7d")
 			switch {
-			case c.why == "" || h.held != "48d1":
+			case c.why == "" || h.held == "bb7ed9ee-670e-48d1-982f-b54b2b73982f":
 				if d.Outcome != OutcomeFresh {
 					t.Errorf("%s: %s; want fresh (a short word by chance)", what, oDescribe([]Decision{d}))
 				}
