@@ -902,8 +902,10 @@ func TestOutcomeASecondAnotherTestsAnswerAlsoHoldsIsTheCallsOwnRead(t *testing.T
 // group stands in one of its seeded ids by chance, about once in 38. At the
 // field that holds the word the place is unchanged, so the piece is chance
 // and the id fresh, whichever run's id holds it; a word that counts by its
-// text there is a conflict. Where round F's answer holds round F's word and
-// the recording's holds none, or gave round F's id whole, it is refused.
+// text there is a conflict. Where round F's answer holds round F's word
+// inside another id and the recording's holds none, it shows nothing of the
+// id's long words: chance there too, and fresh. Where it holds round F's
+// 32-bit group beside it, or gave round F's id whole, it is refused.
 func TestOutcomeAPieceAStartUpsAnswerHoldsInASessionOfItsOwnIsChance(t *testing.T) {
 	const (
 		recSID, liveSID = "5Xa0KmL0RxqLFfFyLtYhPw", "w6Hg1H8rSmm44V0Mn3o7Jg"
@@ -942,7 +944,11 @@ func TestOutcomeAPieceAStartUpsAnswerHoldsInASessionOfItsOwnIsChance(t *testing.
 	}
 	oRefused(t, "round F's 32-bit word at the answer as recorded, its own session", oWord(t, call(plain, long, asRecorded(liveSID)), "1111aaaa", "bb7ed9ee"), RefusalConflict, "mock-0")
 	onlyF := ans(recSID, other).ServedAs(1).ServedLive(ans(liveSID, other, "c0de0000-1111-48d1-8222-333344445555"))
-	oRefused(t, "round F's answer holds round F's word, the recording's none", oWord(t, call(plain, holding, onlyF), "4333", "48d1"), RefusalUnknown, "mock-0")
+	if d := oWord(t, call(plain, holding, onlyF), "4333", "48d1"); d.Outcome != OutcomeFresh {
+		t.Errorf("round F's answer holds round F's word inside another id, the recording's none: %s; want fresh", oDescribe([]Decision{d}))
+	}
+	withLong := ans(recSID, other).ServedAs(1).ServedLive(ans(liveSID, other, "9999cccc-1111-48d1-8222-333344445555"))
+	oRefused(t, "round F's answer holds round F's word beside round F's 32-bit group", oWord(t, call(plain, holding, withLong), "4333", "48d1"), RefusalUnknown, "mock-0")
 	whole := ans(recSID, seeded, other).ServedAs(1).ServedLive(ans(liveSID, holding, other))
 	if d := call(plain, holding, whole); len(d) == 0 || d[0].Outcome != OutcomeRefused {
 		t.Errorf("FALSE GREEN? round F's answer gave round F's id whole: %s; want refused", oDescribe(d))
