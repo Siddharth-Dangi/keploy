@@ -612,7 +612,21 @@ func matchCommandWith(ctx context.Context, logger *zap.Logger, req mysql.Request
 	// with their ReqTimestampMock intact. To distinguish a mock recorded
 	// INSIDE the current test from a stale earlier-test row, we compare each
 	// candidate's ReqTimestampMock against [winStart, winEnd] directly.
-	winStart, winEnd := mockDb.CurrentTestWindow()
+	//
+	// Under exact serving no window is read: the test's mapping says what it
+	// is served, no recorded time (integrations.OwnedByOpenTest), and the
+	// store reports none (MockManager.CurrentTestWindow). Exact serving is
+	// read first, and the window only without it, so one command never reads
+	// both: a store read the other way round can report the window keploy
+	// test staged in the instant exact serving begins, and that window would
+	// narrow the first pass to recordings made inside it while the full scan
+	// reads every one, and bind a transaction (bindAfter) in a window its
+	// next command, read in none, does not hold (boundRecording).
+	exactServing := integrations.ExactServing(mockDb)
+	var winStart, winEnd time.Time
+	if !exactServing {
+		winStart, winEnd = mockDb.CurrentTestWindow()
+	}
 	windowActive := !winStart.IsZero() && !winEnd.IsZero()
 	// mockInCurrentWindow reports whether a mock's recorded request timestamp
 	// lies within the active outer-test window, or the mock was in flight
@@ -635,19 +649,6 @@ func matchCommandWith(ctx context.Context, logger *zap.Logger, req mysql.Request
 		return integrations.InFlightIntoOpenTest(mockDb, mk)
 	}
 
-	// testsOwn reports whether an EXECUTE candidate is the open test's own,
-	// the one the EXECUTE ranking below prefers to every other recording.
-	// While a window is active that is a recording inside it. Under exact
-	// serving no window is (CurrentTestWindow is zero: the test's mapping
-	// says what it is served, no recorded time), and the test's own are its
-	// mapping's (integrations.OwnedByOpenTest). Read by the window alone, no
-	// recording was the test's own there, and the first recording of the
-	// statement whose parameters differ (the FIFO fallback) outranked the one
-	// recorded with the command's own parameters: a statement run twice with
-	// different parameters was answered with each other's rows, and N
-	// connections running it at once all picked the same recording, so all
-	// but one were refused.
-	exactServing := integrations.ExactServing(mockDb)
 	// sameStatementOnly is the rule of a fallback under exact serving: a
 	// recording that is not a match on the command's statement and every
 	// parameter answers it only when it ran the command's own statement.
@@ -682,6 +683,18 @@ func matchCommandWith(ctx context.Context, logger *zap.Logger, req mysql.Request
 	// scores, in either mode (matchStmtExecutePacketQueryAware,
 	// matchQueryLive).
 	sameStatementOnly := exactServing
+	// testsOwn reports whether an EXECUTE candidate is the open test's own,
+	// the one the EXECUTE ranking below prefers to every other recording.
+	// While a window is active that is a recording inside it. Under exact
+	// serving no window is read (above: the test's mapping says what it is
+	// served, no recorded time), and the test's own are its mapping's
+	// (integrations.OwnedByOpenTest). Read by the window alone, no
+	// recording was the test's own there, and the first recording of the
+	// statement whose parameters differ (the FIFO fallback) outranked the one
+	// recorded with the command's own parameters: a statement run twice with
+	// different parameters was answered with each other's rows, and N
+	// connections running it at once all picked the same recording, so all
+	// but one were refused.
 	testsOwn := func(mk *models.Mock) bool {
 		if exactServing {
 			return integrations.OwnedByOpenTest(mockDb, mk)
@@ -2030,10 +2043,11 @@ func matchCommandWith(ctx context.Context, logger *zap.Logger, req mysql.Request
 			// the live query above the rest.
 			(keyedExec && (defExecMock != nil || paramsOnlyMockWindow != nil ||
 				fallbacks.windowPick() != nil || fallbacks.anyPick() != nil)) ||
-			// A COM_QUERY's walk stopped at an exact match the open test does
-			// not own (exact serving, so no window pass) has compared every
-			// mock the test owns (queryUnowned): that match, or the test's own
-			// that waited, outranks every candidate left unread.
+			// A COM_QUERY's walk that stopped at an exact match the open test
+			// does not own (queryUnowned: exact serving alone, which reads no
+			// window, so no window pass runs) has compared every unanswered
+			// mock the test owns: that match, or the test's own that waited,
+			// outranks every candidate left unread.
 			queryUnowned ||
 			// The CLOSE pass scored every recorded CLOSE.
 			(req.Header.Type == sCOM_STMT_CLOSE && matchedMock != nil)

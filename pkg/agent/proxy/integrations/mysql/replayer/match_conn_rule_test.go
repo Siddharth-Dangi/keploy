@@ -1037,6 +1037,85 @@ func TestConnectionRuleVisitsMainsCandidates(t *testing.T) {
 	}
 }
 
+// staleWindowStore is recordedOrderStore still reporting a test window, as
+// a store read in the instant exact serving begins can: keploy test staged
+// that window before. The matcher reads exact serving first, and the window
+// only without it.
+type staleWindowStore struct {
+	recordedOrderStore
+	start, end time.Time
+}
+
+func (s staleWindowStore) CurrentTestWindow() (time.Time, time.Time) { return s.start, s.end }
+
+// Under exact serving no recorded time narrows what a test is served, so of
+// the exact matches the open test does not own the first one the store
+// lists answers, also when the store still reports a window: a later
+// recording made inside that window does not outrank it, on the first pass
+// (the path a replay takes) or on the full scan. Read with the window, the
+// first pass read the window's recordings alone and answered the later one.
+func TestConnectionRuleAnswersTheFirstUnownedMatchUnderAStaleWindow(t *testing.T) {
+	const sel = "SELECT * FROM products WHERE id = 'x'"
+	for _, fullScan := range []bool{false, true} {
+		pool, _ := connPool([]connRec{
+			{"x-early", "cA", sel, 500 * time.Microsecond, -1},
+			{"x-late", "cB", sel, 2000 * time.Microsecond, -1},
+		})
+		mm := proxy.NewMockManager(nil, nil, zap.NewNop())
+		t.Cleanup(mm.Close)
+		mm.SetMocksWithWindow(nil, pool, models.BaseTime, time.Now().Add(time.Hour))
+		mm.ServeExactTest("T0", nil)
+		db := staleWindowStore{recordedOrderStore{mm}, diffBase.Add(time.Millisecond), diffBase.Add(4 * time.Millisecond)}
+		ctx, dctx := connLive("L1")
+		resp, ok, _, err := replayer.MatchBoundForTest(ctx, zap.NewNop(), connReq(sel), db, dctx, fullScan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok || resp == nil || resp.Payload != "x-early" {
+			t.Errorf("full scan %v: %q was answered with %v (ok %v); want x-early, the first exact match the store lists", fullScan, sel, resp, ok)
+		}
+	}
+}
+
+// A transaction's command matched while the store still reports a window
+// binds the transaction as one matched in none: its next command, read with
+// no window reported, is answered on the bound connection. Bound in the
+// window the store reported, the binding was dropped there, and the first
+// exact match the test owns, recorded on another connection, answered.
+func TestConnectionRuleKeepsABindingMadeUnderAStaleWindow(t *testing.T) {
+	const sel = "SELECT * FROM products WHERE id = 'x'"
+	for _, fullScan := range []bool{false, true} {
+		pool, byTest := connPool([]connRec{
+			{"a-start", "cA", "START TRANSACTION", 500 * time.Microsecond, 0},
+			{"a-cust", "cA", "SELECT * FROM customers WHERE id = 'a'", 600 * time.Microsecond, 0},
+			{"b-sel", "cB", sel, 700 * time.Microsecond, 0},
+			{"a-sel", "cA", sel, 800 * time.Microsecond, 0},
+		})
+		mm := proxy.NewMockManager(nil, nil, zap.NewNop())
+		t.Cleanup(mm.Close)
+		mm.SetMocksWithWindow(nil, pool, models.BaseTime, time.Now().Add(time.Hour))
+		mm.ServeExactTest("T0", byTest[0])
+		stale := staleWindowStore{recordedOrderStore{mm}, diffBase.Add(time.Millisecond), diffBase.Add(4 * time.Millisecond)}
+		ctx, dctx := connLive("L1")
+		for _, c := range []struct {
+			db        integrations.MockMemDb
+			sql, want string
+		}{
+			{recordedOrderStore{mm}, "START TRANSACTION", "a-start"},
+			{stale, "SELECT * FROM customers WHERE id = 'a'", "a-cust"},
+			{recordedOrderStore{mm}, sel, "a-sel"},
+		} {
+			resp, ok, _, err := replayer.MatchBoundForTest(ctx, zap.NewNop(), connReq(c.sql), c.db, dctx, fullScan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ok || resp == nil || resp.Payload != c.want {
+				t.Errorf("full scan %v: %q was answered with %v (ok %v); want %s", fullScan, c.sql, resp, ok, c.want)
+			}
+		}
+	}
+}
+
 // A recording that names no connection binds nothing: the transaction's
 // commands are answered with the first exact match, as before the rule, the
 // one recorded before the transaction's latest command's too.
