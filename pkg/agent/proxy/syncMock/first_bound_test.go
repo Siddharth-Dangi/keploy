@@ -38,8 +38,8 @@ func pastTheCap(t *testing.T, t0 time.Time, lostRead bool) (*SyncMockManager, *o
 			t.Fatalf("setup: test-%d left out", i)
 		}
 	}
-	if !m.sentTCs.halved || m.sentTCs.firstLetGo != "first" {
-		t.Fatalf("setup: halved %v, first let go %q, want the sent list halved with first let go", m.sentTCs.halved, m.sentTCs.firstLetGo)
+	if !m.sentTCs.of("").halved || m.sentTCs.of("").firstLetGo != "first" {
+		t.Fatalf("setup: halved %v, first let go %q, want the sent list halved with first let go", m.sentTCs.of("").halved, m.sentTCs.of("").firstLetGo)
 	}
 	return m, logs
 }
@@ -65,7 +65,7 @@ func TestARevokeOfANeverSentNamePastTheCapLeavesTheFirstKnown(t *testing.T) {
 			} else {
 				m.RevokeTestCase(c.name)
 			}
-			if first, ok, exact := m.sentTCs.first(); !ok || !exact || !first.Equal(t0) {
+			if first, ok, exact := m.sentTCs.of("").first(); !ok || !exact || !first.Equal(t0) {
 				t.Fatalf("first %v (known %v, exact %v), want %v, first's start", first, ok, exact, t0)
 			}
 			if n := len(rereadLines(logs)); n != 0 {
@@ -94,7 +94,7 @@ func TestARevokeOfTheFirstLetGoBoundsTheFirstByTheEarliestStillNamed(t *testing.
 	t.Run("the bound", func(t *testing.T) {
 		m, logs := pastTheCap(t, t0, false)
 		m.RevokeTestCase("first")
-		if first, ok, exact := m.sentTCs.first(); !ok || exact || !first.Equal(bound) {
+		if first, ok, exact := m.sentTCs.of("").first(); !ok || exact || !first.Equal(bound) {
 			t.Fatalf("first %v (known %v, exact %v), want a bound at %v", first, ok, exact, bound)
 		}
 		if !m.servedToAnyTest(asyncAt("c2", bound.Add(-time.Nanosecond)), "") {
@@ -144,7 +144,7 @@ func TestAKeptRevokeDoesNotMoveTheFirst(t *testing.T) {
 			later := m.SendingTestCase("later", t0.Add(3*time.Second), t0.Add(4*time.Second))
 			rereads := rereadLines(logs)
 			if !deletes {
-				if f := m.firstSent.Load(); f == nil || !f.Equal(t0) {
+				if f := m.firstSentOf(""); f == nil || !f.Equal(t0) {
 					t.Fatalf("first %v, want %v: a's start, kept by the client", f, t0)
 				}
 				if len(rereads) != 0 || !later {
@@ -177,7 +177,7 @@ func TestAKeptRevokeByNameDoesNotMoveTheFirst(t *testing.T) {
 			} else {
 				m.RevokeTestCase("a")
 			}
-			if f := m.firstSent.Load(); f == nil || !f.Equal(t0) {
+			if f := m.firstSentOf(""); f == nil || !f.Equal(t0) {
 				t.Fatalf("first %v, want %v: a's start, kept by the client", f, t0)
 			}
 			if n := len(rereadLines(logs)); n != 0 {
@@ -201,7 +201,7 @@ func TestASharedLossKeptByTheClientDoesNotMoveTheFirst(t *testing.T) {
 	session.Spec.ReqTimestampMock, session.Spec.ResTimestampMock = t0.Add(500*time.Millisecond), t0.Add(600*time.Millisecond)
 	session.DeriveLifetime()
 	m.dropOut(session, "", m.revokeEpoch.Load(), string(MockDroppedOutputFull))
-	if f := m.firstSent.Load(); f == nil || !f.Equal(t0) {
+	if f := m.firstSentOf(""); f == nil || !f.Equal(t0) {
 		t.Fatalf("first %v, want %v: a's start, kept by the client", f, t0)
 	}
 	if m.servedToAnyTest(asyncAt("c1", t0.Add(200*time.Millisecond)), "") {
