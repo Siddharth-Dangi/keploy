@@ -91,11 +91,8 @@ func apiFlags(t *testing.T, v string, served int) (Raw, []GivenPlaces) {
 // flags hold that character at a field of their own. The id's other word
 // carries its bits, so the short word is a piece of it, and a recording F
 // never served says nothing of a piece that short: fresh, its line stating
-// the floor and naming the place. From the floor up the id's long word
-// judges the place: handed to the call, the place shows nothing of it, so
-// the piece there is chance and fresh, its line naming the place; in the
-// set, keploy keeps the place's words only and leaves the long word unknown
-// there too, so the piece stays refused.
+// the floor and naming the place. From the floor up the same place stays
+// refused, wherever it stands: handed to the call or in the set.
 func TestOutcomeAPIAPieceOfAnIdUnderTheFloorAtAPlaceFNeverServedIsNoEvidence(t *testing.T) {
 	const p = "body.documents[0]._id"
 	fAt := oAt.Add(FullRoundLead)
@@ -121,19 +118,13 @@ func TestOutcomeAPIAPieceOfAnIdUnderTheFloorAtAPlaceFNeverServedIsNoEvidence(t *
 		} {
 			d := oWord(t, Decide(in), tc.r, tc.f)
 			what := tc.what + " (" + tc.bits + " bits) " + name
-			switch {
-			case !tc.fresh && name == "among the set's recordings":
+			if !tc.fresh {
 				costRefused(t, what, d, costUnknown, "mock-0")
-			case !tc.fresh:
-				costFresh(t, what, d)
-				if !strings.Contains(d.Line, "piece of an id") || !strings.Contains(d.Line, "mock-0") {
-					t.Errorf("%s: the line %q does not say the piece is chance and name the place", what, d.Line)
-				}
-			default:
-				costFresh(t, what, d)
-				if !strings.Contains(d.Line, "under 11 bits") || !strings.Contains(d.Line, "mock-0") {
-					t.Errorf("%s: the line %q does not state the floor and name the place", what, d.Line)
-				}
+				continue
+			}
+			costFresh(t, what, d)
+			if !strings.Contains(d.Line, "under 11 bits") || !strings.Contains(d.Line, "mock-0") {
+				t.Errorf("%s: the line %q does not state the floor and name the place", what, d.Line)
 			}
 		}
 	}

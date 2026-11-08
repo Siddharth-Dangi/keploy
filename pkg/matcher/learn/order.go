@@ -525,14 +525,17 @@ func idLongWords(rd textReading, w readWord) []readWord {
 	return long
 }
 
-// idChance reports, for a piece of one id (long: idLongWords), whether
-// the place at i shows nothing of any of the id's long words in either run
-// (evidenceOf is evNone for each, every text read): there the application
-// cannot have taken the id, so a piece of it that the place leaves unknown is
-// chance, as rule B reads a short word at an unchanged place. A place that
-// shows or disproves the piece itself is read as for any word. false for
-// every place where long is empty. Each place is asked once, on demand.
-func (dc *decider) idChance(ps *wordPlaces, long []readWord) func(i int) bool {
+// idChance reports, for w, a piece of one id (long: idLongWords), whether
+// the place at i holds it by chance: it shows nothing of any of the id's
+// long words in either run (evidenceOf is evNone for each, every text
+// read), and holds the piece only inside longer tokens of its own, never as
+// a whole id token (pieceWholeAt). The application copies an id whole, so
+// the place cannot be where it took the id, nor a piece of it: a value of
+// that place's own ("<code>-<random>" built from a place's "<code>") stands
+// there whole. A place that shows or disproves the piece itself is read as
+// for any word. false for every place where long is empty. Each place is
+// asked once, on demand.
+func (dc *decider) idChance(ps *wordPlaces, w readWord, long []readWord) func(i int) bool {
 	if len(long) == 0 {
 		return func(int) bool { return false }
 	}
@@ -541,7 +544,7 @@ func (dc *decider) idChance(ps *wordPlaces, long []readWord) func(i int) bool {
 		if known[i] == 0 {
 			p := *ps.at(i)
 			known[i] = 1
-			if slices.ContainsFunc(long, func(o readWord) bool {
+			if pieceWholeAt(p, w.Rec, w.Live) || slices.ContainsFunc(long, func(o readWord) bool {
 				ev, read := evidenceOf(p, heldAt(p, o.Rec, o.Live), o.Rec, o.Live, false)
 				return ev != evNone || !read
 			}) {
@@ -552,12 +555,26 @@ func (dc *decider) idChance(ps *wordPlaces, long []readWord) func(i int) bool {
 	}
 }
 
-// idOutside is, for a piece of one id (long: idLongWords), whether the
-// set's recording j shows anything of one of the id's long words
-// (setEvidence is not evNone), the outside recordings' idChance: one that
-// shows nothing of them, and leaves the piece unknown, holds it by chance. nil where long is empty:
-// every recording is read as for any word.
-func (dc *decider) idOutside(oh *outsideHeld, long []readWord) func(j int32) bool {
+// pieceWholeAt reports whether a text of p holds the piece as a whole id
+// token (main's idByte reading, holdsToken): the recorded word in the
+// recording's text, round F's in round F's or in a view F's serves gave.
+// A text keploy could not read may: fail closed.
+func pieceWholeAt(p evPlace, r, f string) bool {
+	whole := func(t *readerText, w string) bool {
+		h, ok := t.holdsToken(tokenID, w)
+		return h || !ok
+	}
+	return whole(p.t.rec, r) || whole(p.t.live, f) || slices.ContainsFunc(p.t.views, func(v *readerText) bool { return whole(v, f) })
+}
+
+// idOutside is, for w, a piece of one id (long: idLongWords), whether the
+// set's recording j may be where the application took it, the outside
+// recordings' idChance: it shows anything of one of the id's long words
+// (setEvidence is not evNone), or one of its lists holds the recorded or
+// round F's piece as a whole id token. One that does neither, and leaves
+// the piece unknown, holds it by chance. nil where long is empty: every
+// recording is read as for any word.
+func (dc *decider) idOutside(oh *outsideHeld, w readWord, long []readWord) func(j int32) bool {
 	if len(long) == 0 {
 		return nil
 	}
@@ -568,11 +585,22 @@ func (dc *decider) idOutside(oh *outsideHeld, long []readWord) func(j int32) boo
 		hs[k] = held{oh.holding(o.Rec), oh.holding(o.Live)}
 	}
 	return func(j int32) bool {
-		return slices.ContainsFunc(hs, func(h held) bool {
+		return gs[j].holdsWholeID(w.Rec) || gs[j].holdsWholeID(w.Live) || slices.ContainsFunc(hs, func(h held) bool {
 			ev, _ := setEvidence(gs[j], h.r[j], h.f[j], dc.in.At, false)
 			return ev != evNone
 		})
 	}
+}
+
+// holdsWholeID reports whether one of g's lists (its answer's, F's view of
+// it, a view F's serves gave) holds t as a whole id token: a word of main's
+// idByte reading, stamps read as any text.
+func (g givenWords) holdsWholeID(t string) bool {
+	id := len(readings) - 1
+	if g.answerLists.holds(id, t, true) || g.view.holds(id, t, true) {
+		return true
+	}
+	return slices.ContainsFunc(g.views, func(l answerLists) bool { return l.holds(id, t, true) })
 }
 
 // neverServed reports whether the set's read saw no serve of mock.
@@ -685,7 +713,7 @@ func (dc *decider) wordBy(path string, bare variables.Address, rec, live, text s
 	// nothing (evNone), so both loops pass it.
 	held := make([]evHeld, len(dc.ps))
 	ask := dc.places().asked(len(dc.ps), w)
-	idChance := dc.idChance(ps, long)
+	idChance := dc.idChance(ps, w, long)
 	for i := range dc.ps {
 		if ask != nil && !ask[i] {
 			held[i] = evHeld{read: true}
@@ -794,7 +822,7 @@ func (dc *decider) wordBy(path string, bare variables.Address, rec, live, text s
 	// state leaves them unknown, show anything of it (outsideHeld).
 	gs, oh := dc.outside().words, dc.held()
 	inR, inF := oh.holding(w.Rec), oh.holding(w.Live)
-	idShows := dc.idOutside(oh, long)
+	idShows := dc.idOutside(oh, w, long)
 	for _, j := range oh.asked(true, inR, inF) {
 		g := gs[j]
 		outsideAsked.Add(1)
